@@ -1,7 +1,7 @@
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import { Package, Product, OrderSimulatorProps } from '../types';
 import { Card, Button, StatCard } from './ui/UIComponents';
-import { ShoppingCart, RefreshCw, Trash2, TrendingUp, DollarSign, Package as PackageIcon } from 'lucide-react';
+import { ShoppingCart, RefreshCw, Trash2, TrendingUp, DollarSign, Package as PackageIcon, ClipboardList, Box } from 'lucide-react';
 
 const OrderSimulator: React.FC<OrderSimulatorProps> = ({ packages, products }) => {
   // State: Map of packageId -> quantity
@@ -51,6 +51,49 @@ const OrderSimulator: React.FC<OrderSimulatorProps> = ({ packages, products }) =
   };
 
   const { revenue, profit, itemCount } = calculateTotals();
+
+  // Shopping List Calculation
+  const shoppingList = useMemo(() => {
+    const totals: Record<string, number> = {};
+
+    // 1. Aggregate totals
+    Object.entries(quantities).forEach(([pkgId, qtyValue]) => {
+      const pkgQty = qtyValue as number;
+      const pkg = packages.find(p => p.id === pkgId);
+      if (pkg && pkgQty > 0) {
+        pkg.items.forEach(item => {
+          totals[item.productId] = (totals[item.productId] || 0) + (item.quantity * pkgQty);
+        });
+      }
+    });
+
+    // 2. Map to display data
+    return Object.entries(totals).map(([productId, totalUnits]) => {
+      const product = products.find(p => p.id === productId);
+      if (!product) return null;
+
+      let buyAmount = '';
+      let notes = '';
+
+      if (product.isBulk && product.packUnits && product.packUnits > 0) {
+        const packsToBuy = Math.ceil(totalUnits / product.packUnits);
+        buyAmount = `${packsToBuy} מארזים`;
+        notes = `(כל מארז מכיל ${product.packUnits} יח')`;
+      } else {
+        buyAmount = `${totalUnits} יחידות`;
+      }
+
+      return {
+        id: productId,
+        name: product.name,
+        totalUnits,
+        buyAmount,
+        notes,
+        isBulk: product.isBulk
+      };
+    }).filter((item): item is NonNullable<typeof item> => item !== null)
+      .sort((a, b) => a.name.localeCompare(b.name));
+  }, [quantities, packages, products]);
 
   if (packages.length === 0) {
     return (
@@ -176,6 +219,58 @@ const OrderSimulator: React.FC<OrderSimulatorProps> = ({ packages, products }) =
            </Card>
         </div>
       </div>
+
+      {/* Shopping List Section */}
+      {itemCount > 0 && (
+        <Card className="mt-8 border-t-4 border-t-indigo-500">
+          <div className="p-6">
+            <h3 className="text-xl font-bold text-slate-800 flex items-center gap-2 mb-6">
+              <ClipboardList className="w-6 h-6 text-indigo-600" />
+              סיכום מלאי להזמנה
+            </h3>
+            
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm text-right">
+                <thead className="bg-slate-50 text-slate-600 font-medium">
+                  <tr>
+                    <th className="px-4 py-3 rounded-r-lg">שם המוצר</th>
+                    <th className="px-4 py-3">כמות לקנייה</th>
+                    <th className="px-4 py-3 rounded-l-lg w-1/4">סה"כ יחידות נדרשות</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100">
+                  {shoppingList.map((item) => (
+                    <tr key={item.id} className="hover:bg-slate-50 transition-colors">
+                      <td className="px-4 py-3 font-medium text-slate-800">
+                        <div className="flex items-center gap-2">
+                          {item.isBulk ? <Box className="w-4 h-4 text-indigo-500" /> : <div className="w-4 h-4" />}
+                          {item.name}
+                        </div>
+                      </td>
+                      <td className="px-4 py-3">
+                        <div className="flex flex-col">
+                          <span className="font-bold text-indigo-600">{item.buyAmount}</span>
+                          {item.notes && <span className="text-xs text-slate-400">{item.notes}</span>}
+                        </div>
+                      </td>
+                      <td className="px-4 py-3 text-slate-600">
+                        {item.totalUnits} יחידות
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+            
+            <div className="mt-4 p-4 bg-indigo-50 rounded-lg text-sm text-indigo-800 border border-indigo-100">
+              <p>
+                <strong>שים לב:</strong> הכמויות בטבלה מחושבות לפי סך כל החבילות שנבחרו.
+                עבור מוצרים הנמכרים במארזים, החישוב מעגל כלפי מעלה למספר המארזים השלם הקרוב ביותר.
+              </p>
+            </div>
+          </div>
+        </Card>
+      )}
     </div>
   );
 };
