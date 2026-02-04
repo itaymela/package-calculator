@@ -1,7 +1,7 @@
 import React, { useState, useMemo } from 'react';
 import { Package, Product, OrderSimulatorProps } from '../types';
 import { Card, Button, StatCard } from './ui/UIComponents';
-import { ShoppingCart, RefreshCw, Trash2, TrendingUp, DollarSign, Package as PackageIcon, ClipboardList, Box } from 'lucide-react';
+import { ShoppingCart, RefreshCw, Trash2, TrendingUp, DollarSign, Package as PackageIcon, ClipboardList, Box, Calculator } from 'lucide-react';
 
 const OrderSimulator: React.FC<OrderSimulatorProps> = ({ packages, products }) => {
   // State: Map of packageId -> quantity
@@ -13,6 +13,21 @@ const OrderSimulator: React.FC<OrderSimulatorProps> = ({ packages, products }) =
       const next = Math.max(0, current + delta);
       const newQuantities = { ...prev, [pkgId]: next };
       if (next === 0) delete newQuantities[pkgId];
+      return newQuantities;
+    });
+  };
+
+  const handleSetQty = (pkgId: string, value: string) => {
+    const cleanValue = value.replace(/^0+/, ''); // Prevent '05'
+    const next = parseInt(cleanValue);
+    
+    setQuantities(prev => {
+      const newQuantities = { ...prev };
+      if (isNaN(next) || next <= 0) {
+        delete newQuantities[pkgId];
+      } else {
+        newQuantities[pkgId] = next;
+      }
       return newQuantities;
     });
   };
@@ -53,7 +68,7 @@ const OrderSimulator: React.FC<OrderSimulatorProps> = ({ packages, products }) =
   const { revenue, profit, itemCount } = calculateTotals();
 
   // Shopping List Calculation
-  const shoppingList = useMemo(() => {
+  const { listItems, totalShoppingCost } = useMemo(() => {
     const totals: Record<string, number> = {};
 
     // 1. Aggregate totals
@@ -67,21 +82,30 @@ const OrderSimulator: React.FC<OrderSimulatorProps> = ({ packages, products }) =
       }
     });
 
+    let totalCost = 0;
+
     // 2. Map to display data
-    return Object.entries(totals).map(([productId, totalUnits]) => {
+    const items = Object.entries(totals).map(([productId, totalUnits]) => {
       const product = products.find(p => p.id === productId);
       if (!product) return null;
 
       let buyAmount = '';
       let notes = '';
+      let estimatedCost = 0;
 
       if (product.isBulk && product.packUnits && product.packUnits > 0) {
         const packsToBuy = Math.ceil(totalUnits / product.packUnits);
         buyAmount = `${packsToBuy} מארזים`;
-        notes = `(כל מארז מכיל ${product.packUnits} יח')`;
+        notes = `(מעוגל ל-${packsToBuy} מארזים)`;
+        // Cost calculation: Packs * Pack Cost
+        const pCost = product.packCost !== undefined ? product.packCost : (product.cost * product.packUnits);
+        estimatedCost = packsToBuy * pCost;
       } else {
         buyAmount = `${totalUnits} יחידות`;
+        estimatedCost = totalUnits * product.cost;
       }
+
+      totalCost += estimatedCost;
 
       return {
         id: productId,
@@ -89,10 +113,13 @@ const OrderSimulator: React.FC<OrderSimulatorProps> = ({ packages, products }) =
         totalUnits,
         buyAmount,
         notes,
-        isBulk: product.isBulk
+        isBulk: product.isBulk,
+        estimatedCost
       };
     }).filter((item): item is NonNullable<typeof item> => item !== null)
       .sort((a, b) => a.name.localeCompare(b.name));
+      
+    return { listItems: items, totalShoppingCost: totalCost };
   }, [quantities, packages, products]);
 
   if (packages.length === 0) {
@@ -136,19 +163,23 @@ const OrderSimulator: React.FC<OrderSimulatorProps> = ({ packages, products }) =
                     </div>
                     
                     <div className="mt-4 flex items-center justify-end gap-3">
-                      {qty > 0 && (
-                         <span className="text-sm font-bold text-indigo-600 w-8 text-center">{qty}</span>
-                      )}
-                      <div className="flex items-center bg-white rounded-lg border border-slate-200 shadow-sm overflow-hidden">
+                      <div className="flex items-center bg-white rounded-lg border border-slate-200 shadow-sm overflow-hidden h-9">
                         <button 
                           onClick={() => handleUpdateQty(pkg.id, -1)}
-                          className="px-3 py-1.5 hover:bg-slate-50 text-slate-600 disabled:opacity-30"
+                          className="px-3 hover:bg-slate-50 text-slate-600 disabled:opacity-30 h-full border-e border-slate-200"
                           disabled={qty === 0}
                         >-</button>
-                        <div className="w-px h-4 bg-slate-200"></div>
+                        <input 
+                           type="number"
+                           min="0"
+                           className="w-14 text-center text-slate-800 font-bold focus:outline-none focus:bg-indigo-50 h-full appearance-none"
+                           value={qty > 0 ? qty : ''}
+                           placeholder="0"
+                           onChange={(e) => handleSetQty(pkg.id, e.target.value)}
+                        />
                         <button 
                           onClick={() => handleUpdateQty(pkg.id, 1)}
-                          className="px-3 py-1.5 hover:bg-slate-50 text-indigo-600 font-medium"
+                          className="px-3 hover:bg-slate-50 text-indigo-600 font-medium h-full border-s border-slate-200"
                         >+</button>
                       </div>
                     </div>
@@ -235,11 +266,12 @@ const OrderSimulator: React.FC<OrderSimulatorProps> = ({ packages, products }) =
                   <tr>
                     <th className="px-4 py-3 rounded-r-lg">שם המוצר</th>
                     <th className="px-4 py-3">כמות לקנייה</th>
-                    <th className="px-4 py-3 rounded-l-lg w-1/4">סה"כ יחידות נדרשות</th>
+                    <th className="px-4 py-3">סה"כ יחידות</th>
+                    <th className="px-4 py-3 rounded-l-lg">עלות לקנייה</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100">
-                  {shoppingList.map((item) => (
+                  {listItems.map((item) => (
                     <tr key={item.id} className="hover:bg-slate-50 transition-colors">
                       <td className="px-4 py-3 font-medium text-slate-800">
                         <div className="flex items-center gap-2">
@@ -256,17 +288,34 @@ const OrderSimulator: React.FC<OrderSimulatorProps> = ({ packages, products }) =
                       <td className="px-4 py-3 text-slate-600">
                         {item.totalUnits} יחידות
                       </td>
+                      <td className="px-4 py-3 font-medium text-slate-700">
+                        ₪{item.estimatedCost.toFixed(2)}
+                      </td>
                     </tr>
                   ))}
+                  
+                  {/* Grand Total Row */}
+                  <tr className="bg-indigo-50/50">
+                    <td colSpan={3} className="px-4 py-4 text-left font-bold text-slate-700">
+                      סה"כ עלות קנייה משוערת:
+                    </td>
+                    <td className="px-4 py-4 font-bold text-xl text-indigo-700">
+                      ₪{totalShoppingCost.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                    </td>
+                  </tr>
                 </tbody>
               </table>
             </div>
             
-            <div className="mt-4 p-4 bg-indigo-50 rounded-lg text-sm text-indigo-800 border border-indigo-100">
-              <p>
-                <strong>שים לב:</strong> הכמויות בטבלה מחושבות לפי סך כל החבילות שנבחרו.
-                עבור מוצרים הנמכרים במארזים, החישוב מעגל כלפי מעלה למספר המארזים השלם הקרוב ביותר.
-              </p>
+            <div className="mt-4 flex items-start gap-2 text-sm text-slate-500 bg-slate-50 p-3 rounded-lg border border-slate-100">
+              <Calculator className="w-4 h-4 mt-0.5 text-indigo-400" />
+              <div>
+                <p>
+                  <strong>שים לב:</strong> עבור מוצרים הנמכרים במארזים (Bulk), עלות הקנייה מחושבת לפי מספר המארזים השלמים שיש לרכוש.
+                  <br />
+                  לדוגמה: אם צריך 22 יחידות וכל מארז מכיל 20, החישוב יכלול עלות של 2 מארזים.
+                </p>
+              </div>
             </div>
           </div>
         </Card>
